@@ -1,0 +1,74 @@
+// fizz_gesture_player — one-shot ジェスチャの bone offset 計算コア。
+//
+// 責務 (一行): ジェスチャ ID と進捗 u (0..1) から、各ボーン回転のオフセットを
+// 計算する。ブラウザはジェスチャ開始時刻を持ち、u = (now-startT)/duration を
+// 計算してここを呼び、返ったオフセットを idle clip に**加算合成**して VRM に適用する。
+//
+// 設計: **envelope (timing/curve) × amplitude (どのボーンにどれだけ) = channel offset**。
+//   - envelope(g, u): ジェスチャの時間エンベロープ (trapezoid / nod波 / shake波)
+//   - amplitude(g, ch): そのジェスチャが channel ch に乗せる定数係数
+// lipsync / idle-motion と同じく DSP は Almide で 1 回書き、native と wasm の両方で使う。
+//
+// 移植元: openaituber src/vrm/idle.ts (banzai/rage/slump/relax/nod/shake/tilt/shrug)。
+//
+// ── gesture id ──        ── channel id ──
+//   0 banzai  4 nod         0 head_x (pitch)   4 l_shoulder_z
+//   1 rage    5 shake       1 head_y (yaw)     5 r_shoulder_z
+//   2 slump   6 tilt        2 head_z (roll)    6 l_upperarm_z
+//   3 relax   7 shrug       3 spine_x          7 r_upperarm_z
+
+import math
+import float
+
+let N_CHANNELS = 8
+
+// C² なイージング (6x⁵-15x⁴+10x³)。端点の加速度が 0 で「ヌルッ」と動く。
+fn smootherstep(x: Float) -> Float = x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+
+// 台形エンベロープ [0,1]。raise までで立ち上がり、lower まで保持、以降減衰。
+fn trapezoid(u: Float, raise: Float, lower: Float) -> Float =
+  if u < raise then smootherstep(u / raise)
+  else if u < lower then 1.0
+  else 1.0 - smootherstep((u - lower) / (1.0 - lower))
+
+// ジェスチャの持続時間 (秒)。
+fn duration(g: Int) -> Float = match g {
+  0 => 2.0, 1 => 2.5, 2 => 3.0, 3 => 2.2,   // banzai/rage/slump/relax
+  4 => 0.95, 5 => 0.9, 6 => 1.5, 7 => 1.1,  // nod/shake/tilt/shrug
+  _ => 0.0,
+}
+
+// 時間エンベロープ。trapezoid 系は [0,1]、nod/shake は最終値そのもの (head 回転)。
+fn envelope(g: Int, u: Float) -> Float = match g {
+  0 => trapezoid(u, 0.35, 0.65),  // banzai
+  1 => trapezoid(u, 0.25, 0.75),  // rage
+  2 => trapezoid(u, 0.2, 0.8),    // slump
+  3 => trapezoid(u, 0.3, 0.7),    // relax
+  // nod: (1-cos)/2 で C∞ なベル波を 2 個 (うなずき2回)
+  4 => (1.0 - math.cos(u * 4.0 * math.pi())) / 2.0 * 0.22,
+  // shake: 左右振り (signed sin) を smootherstep の補集合で減衰
+  5 => math.sin(u * math.pi() * 4.0) * 0.18 * (1.0 - smootherstep(u)),
+  6 => trapezoid(u, 0.25, 0.75),  // tilt
+  7 => trapezoid(u, 0.2, 0.7),    // shrug
+  _ => 0.0,
+}
+
+// (gesture, channel) ごとの振幅定数。envelope に掛けると channel offset になる。
+// 0 head_x / 1 head_y / 2 head_z / 3 spine_x / 4 lSh_z / 5 rSh_z / 6 lUA_z / 7 rUA_z
+fn amplitude(g: Int, ch: Int) -> Float = match g {
+  0 => match ch { 6 => 0.0 - 2.0, 7 => 2.0, 4 => 0.0 - 0.18, 5 => 0.18, _ => 0.0 },  // banzai
+  1 => match ch { 3 => 0.15, 0 => 0.08, 4 => 0.0 - 0.12, 5 => 0.12, _ => 0.0 },      // rage
+  2 => match ch { 3 => 0.10, 0 => 0.22, 4 => 0.12, 5 => 0.0 - 0.12, _ => 0.0 },      // slump
+  3 => match ch { 2 => 0.18, 0 => 0.0 - 0.04, 3 => 0.0 - 0.05, _ => 0.0 },           // relax
+  4 => match ch { 0 => 1.0, _ => 0.0 },                                              // nod → head_x
+  5 => match ch { 1 => 1.0, _ => 0.0 },                                              // shake → head_y
+  6 => match ch { 2 => 0.22, _ => 0.0 },                                             // tilt → head_z
+  7 => match ch { 4 => 0.0 - 0.2, 5 => 0.2, 0 => 0.05, 2 => 0.07, _ => 0.0 },        // shrug
+  _ => 0.0,
+}
+
+// ジェスチャ g の進捗 u における channel ch のボーンオフセット (rad)。
+// 範囲外 (u<0 or u>=1) は 0 (ジェスチャ終了)。
+fn channel(g: Int, ch: Int, u: Float) -> Float =
+  if u < 0.0 or u >= 1.0 then 0.0
+  else envelope(g, u) * amplitude(g, ch)

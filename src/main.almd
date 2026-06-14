@@ -1,0 +1,45 @@
+// CLI エントリポイント (native) — 1 ジェスチャの bone offset 曲線を precompute / 確認。
+//
+// FIZZ_GESTURE (id 0..7、既定 4=nod) の曲線を FIZZ_GESTURE_FPS で刻んで NDJSON 出力。
+//
+//   {"u":..,"head_x":..,"head_y":..,"head_z":..,"spine_x":..,"l_sh_z":..,"r_sh_z":..,"l_ua_z":..,"r_ua_z":..}
+//
+// 同じ DSP コア (mod.almd) が wasm/raf 側でも走る。record をループ内で束縛しない
+// (channel は Float を返す)ので、almide v0.27.6 でも安全 (S6-1 を踏まない)。
+
+import self as gp
+import env
+import json
+import value
+import string
+import int
+import float
+
+effect fn main() -> Unit = {
+  let g = match int.parse(string.trim(env.get("FIZZ_GESTURE") ?? "")) {
+    ok(n)  => n,
+    err(_) => 4,
+  }
+  let fps = match int.parse(string.trim(env.get("FIZZ_GESTURE_FPS") ?? "")) {
+    ok(n)  => if n < 1 then 1 else n,
+    err(_) => 30,
+  }
+  let frames = gp.duration(g) * int.to_float(fps)
+  let total = float.to_int(frames)
+  var i = 0
+  while i < total {
+    let u = int.to_float(i) / frames
+    println(json.stringify(value.object([
+      ("u", value.float(u)),
+      ("head_x", value.float(gp.channel(g, 0, u))),
+      ("head_y", value.float(gp.channel(g, 1, u))),
+      ("head_z", value.float(gp.channel(g, 2, u))),
+      ("spine_x", value.float(gp.channel(g, 3, u))),
+      ("l_sh_z", value.float(gp.channel(g, 4, u))),
+      ("r_sh_z", value.float(gp.channel(g, 5, u))),
+      ("l_ua_z", value.float(gp.channel(g, 6, u))),
+      ("r_ua_z", value.float(gp.channel(g, 7, u))),
+    ])))
+    i = i + 1
+  }
+}

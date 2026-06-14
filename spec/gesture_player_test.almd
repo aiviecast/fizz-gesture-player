@@ -1,0 +1,56 @@
+import self as gp
+
+local fn near(a: Float, b: Float) -> Bool = {
+  let d = a - b
+  if d < 0.0 then (0.0 - d) < 0.001 else d < 0.001
+}
+
+test "smootherstep endpoints and midpoint" {
+  assert(near(gp.smootherstep(0.0), 0.0))
+  assert(near(gp.smootherstep(1.0), 1.0))
+  assert(near(gp.smootherstep(0.5), 0.5))
+}
+
+test "trapezoid: 0 at ends, 1 on the hold plateau" {
+  assert(near(gp.trapezoid(0.0, 0.3, 0.7), 0.0))
+  assert(near(gp.trapezoid(0.3, 0.3, 0.7), 1.0))   // raise 終点で smootherstep(1)=1
+  assert(near(gp.trapezoid(0.5, 0.3, 0.7), 1.0))   // hold
+  assert(near(gp.trapezoid(1.0, 0.3, 0.7), 0.0))
+}
+
+test "durations per gesture" {
+  assert(near(gp.duration(0), 2.0))   // banzai
+  assert(near(gp.duration(4), 0.95))  // nod
+  assert(near(gp.duration(7), 1.1))   // shrug
+}
+
+test "nod drives head_x with a 2-bump waveform, nothing else" {
+  // u=0.25 で (1-cos(π))/2*0.22 = 0.22 (1 つ目の山)
+  assert(near(gp.channel(4, 0, 0.25), 0.22))
+  // u=0.5 で (1-cos(2π))/2*0.22 = 0 (谷)
+  assert(near(gp.channel(4, 0, 0.5), 0.0))
+  // head_y / spine などは触らない
+  assert(near(gp.channel(4, 1, 0.25), 0.0))
+  assert(near(gp.channel(4, 3, 0.25), 0.0))
+}
+
+test "banzai raises the arms (l/r upperarm_z opposite signs) on the plateau" {
+  // u=0.5 は banzai の hold (trapezoid(0.5,0.35,0.65)=1)
+  assert(near(gp.channel(0, 6, 0.5), -2.0))  // l upperarm
+  assert(near(gp.channel(0, 7, 0.5), 2.0))   // r upperarm
+  assert(near(gp.channel(0, 4, 0.5), -0.18)) // l shoulder
+  assert(near(gp.channel(0, 5, 0.5), 0.18))  // r shoulder
+  assert(near(gp.channel(0, 0, 0.5), 0.0))   // head は触らない
+}
+
+test "out-of-range progress yields no offset (gesture ended)" {
+  assert(near(gp.channel(0, 7, 1.5), 0.0))
+  assert(near(gp.channel(0, 7, -0.1), 0.0))
+  assert(near(gp.channel(4, 0, 1.0), 0.0))   // u>=1
+}
+
+test "tilt drives only head_z" {
+  assert(gp.channel(6, 2, 0.5) > 0.0)        // head_z (roll) on plateau
+  assert(near(gp.channel(6, 0, 0.5), 0.0))
+  assert(near(gp.channel(6, 4, 0.5), 0.0))
+}

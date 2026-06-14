@@ -1,0 +1,5 @@
+build/
+*.wasm
+*.cwasm
+fizz-gesture-player
+.almide/

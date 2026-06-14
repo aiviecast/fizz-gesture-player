@@ -1,0 +1,4 @@
+[package]
+name = "fizz_gesture_player"
+version = "0.1.0"
+description = "Fizz gesture player — one-shot gesture (banzai/rage/nod/shrug...) bone-offset curves. One Almide core, native + wasm (per-frame additive blend over the idle clip)."
