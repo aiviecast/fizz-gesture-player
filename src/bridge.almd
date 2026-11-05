@@ -17,11 +17,11 @@ import float
 // ジェスチャ g の進捗 u における channel ch のボーンオフセット。
 @export(wasm, "gesture_ch")
 fn gesture_ch(gid: Float, ch: Float, u: Float) -> Float =
-  gp.channel(float.to_int(gid), float.to_int(ch), u)
+  gp.channel(int.from_saturating(gid), int.from_saturating(ch), u)
 
 // ジェスチャ g の持続時間 (秒)。JS が u の正規化に使う。
 @export(wasm, "gesture_duration")
-fn gesture_duration(gid: Float) -> Float = gp.duration(float.to_int(gid))
+fn gesture_duration(gid: Float) -> Float = gp.duration(int.from_saturating(gid))
 
 effect fn main() -> Unit = {
   let _a = gesture_ch(0.0, 0.0, 0.0)
